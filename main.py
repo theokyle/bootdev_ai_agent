@@ -3,6 +3,7 @@ import sys
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from functions.call_function import call_function
 
 load_dotenv()
 api_key = os.environ.get("GEMINI_API_KEY")
@@ -13,8 +14,17 @@ if len(sys.argv) <= 1:
     sys.exit(1)
 
 user_prompt = ""
-for i in range(1, len(sys.argv)):
-    user_prompt += sys.argv[i] + " "
+verbose = False
+i=0
+for arg in sys.argv:
+    if i == 0:
+        i = 1
+        continue
+    if arg == "--verbose":
+        verbose = True
+    else:   
+        user_prompt += arg + " "
+
 
 messages = [
     types.Content(role="user", parts=[types.Part(text=user_prompt)]),
@@ -102,18 +112,27 @@ available_functions = types.Tool(
     ]
 )
 
-response = client.models.generate_content(
-    model="gemini-2.0-flash-001",
-    contents=messages,
-    config=types.GenerateContentConfig(tools=[available_functions], system_instruction=system_prompt)
-)
+for i in range(20):
 
-if response.function_calls:
-    for function_call_part in response.function_calls:
-        print(f"Calling function: {function_call_part.name}({function_call_part.args})")
-else:
-    print(response.text)
-if "--verbose" in sys.argv:
-    print(f"User prompt: {user_prompt}")
-    print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}")
-    print(f"Response tokens: {response.usage_metadata.candidates_token_count}")
+    response = client.models.generate_content(
+        model="gemini-2.0-flash-001",
+        contents=messages,
+        config=types.GenerateContentConfig(tools=[available_functions], system_instruction=system_prompt)
+    )
+
+    for candidate in response.candidates:
+        messages.append(candidate.content)
+
+    if response.function_calls:
+        for function_call_part in response.function_calls:
+            function_response = call_function(function_call_part, verbose)
+            messages.append(function_response)
+            if "error" in function_response.parts[0].function_response.response:
+                raise Exception("No response from function call")
+            elif verbose:
+                print(f"-> {function_response.parts[0].function_response.response}")
+        continue
+    break
+
+print(f"Final response: {response.text}")
+
